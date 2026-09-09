@@ -1,0 +1,11 @@
+# Pinned runtime deps (pip fallback for the uv/pyproject workflow).
+# Install the package itself with:  pip install -e .
+numpy>=1.26,<3
+pandas>=2.1,<3
+psycopg[binary]>=3.1,<4
+neo4j>=5.14,<6
+pydantic>=2.5,<3
+pydantic-settings>=2.1,<3
+scikit-learn>=1.3,<2
+scipy>=1.11,<2
+pytest>=7.4
