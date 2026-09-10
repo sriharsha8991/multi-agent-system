@@ -1,4 +1,4 @@
-# Multi-Agent Industrial Asset Analytics — Data Layer
+# multi-agent-system# Multi-Agent Industrial Asset Analytics — Data Layer
 
 Physics-driven synthetic telemetry (PostgreSQL) + a mutually-consistent asset
 ontology (Neo4j) for the multi-agent case study ([Problem.md](Problem.md)).
