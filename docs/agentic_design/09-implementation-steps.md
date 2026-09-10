@@ -25,7 +25,7 @@ build checklist; it defines *what each piece is, what it may not do, and when it
 5. **One doorway per concern** (§3): one message builder, one routing surface, one
    data→LLM path, one DB entry point per store.
 6. **Determinism lints.** No `datetime.now()` / `uuid4()` / unsorted `json.dumps` in
-   grounding, digests, or cache keys.
+   grounding, digests, or cache keys; every LLM call pins `temperature=0` + a fixed `seed`.
 7. **Each piece ships with its test.** A step is not done until its Definition of Done
    (DoD) is green.
 
@@ -99,7 +99,7 @@ def capability(spec: Capability): ...      # decorator → REGISTRY[name]
 
 ```python
 # llm/client.py
-def complete_structured(schema: type[T], *, system: list, messages: list, effort: str) -> T: ...  # owns cache_control, structured outputs; no temperature/prefill/budget_tokens
+def complete_structured(schema: type[T], *, system, contents, thinking_level: str, seed: int = SEED) -> T: ...  # google-genai; response_schema → response.parsed; temperature=0; implicit cache; guards finish_reason (SAFETY/MAX_TOKENS)
 # harness/clock.py
 def now_anchor() -> datetime: ...
 def resolve_window(expr: str, anchor: datetime) -> tuple[datetime, datetime]: ...   # "yesterday" → [t0,t1)
@@ -107,7 +107,7 @@ def resolve_window(expr: str, anchor: datetime) -> tuple[datetime, datetime]: ..
 
 | Step | Module | Single responsibility | Depends | Done when |
 |---|---|---|---|---|
-| S1.1 | `llm/client.py` | The **only** Anthropic call site: structured output + cache prefix discipline | S0.1 | `Decision` round-trips; `cache_read_input_tokens>0` on 2nd identical call |
+| S1.1 | `llm/client.py` | The **only** Gemini (`google-genai`) call site: structured output + implicit-cache prefix + `temperature=0`/`seed` + `finish_reason` guard | S0.1 | `Decision` round-trips typed; `total_cached_tokens>0` on 2nd identical call |
 | S1.2 | `harness/clock.py` | Frozen-anchor read + code-side relative-time resolution | S0.2 | "yesterday"/"7 d"/"that window" → correct, stable `[t0,t1)` |
 
 ### Phase 2 — Working memory, digests, context, cache (L2)
@@ -177,7 +177,7 @@ def build() -> CompiledStateGraph: ...            # wire nodes/edges; compile(ch
 | S5.3 | `orchestrator/supervisor.py` | per-hop `Decision` over the registry; budget + progress guards | S0.3, S1.1, S2.3 | adapts to digests; registry-only choices; budget caps hops |
 | S5.4 | `orchestrator/replay.py` | deterministic trajectory replay (no LLM) | S2.4, S3.* | replay hashes stable ×5 |
 | S5.5 | `orchestrator/synthesizer.py` | digests → NL answer; every number attributed | S1.1, S2.2 | no un-attributed number survives |
-| S5.6 | `orchestrator/validation.py` | final answer-vs-query check (code + judge); bounded re-fetch | S1.1 | catches a seeded gap; re-fetch capped at 1 |
+| S5.6 | `orchestrator/validation.py` | final answer-vs-query check (code + judge + **multimodal figure check, Gemini vision**); bounded re-fetch | S1.1 | catches a seeded gap; a wrong-looking figure is caught; re-fetch capped at 1 |
 | S5.7 | `orchestrator/graph.py` | wire the `StateGraph`; global budget; graceful degradation | S5.1–S5.6 | flagship end-to-end; `draw_mermaid_png()` renders |
 
 ### Phase 6 — Evals & demo (L6)

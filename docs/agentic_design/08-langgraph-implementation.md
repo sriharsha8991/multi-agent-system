@@ -14,14 +14,15 @@ edge-case/failure contract, and the build plan.
 > Where those docs described a *hand-rolled* orchestrator or harness, **this doc
 > supersedes them** (see §13 ADRs).
 >
-> **Source of truth for requirements:** [Problem.md](../../Problem.md). Anthropic API
-> facts are verified against the `claude-api` skill.
+> **Source of truth for requirements:** [Problem.md](../../Problem.md). Gemini API facts
+> reflect the current `google-genai` SDK / Gemini 3 docs; confirm model IDs via
+> `client.models.list()` (the lineup moves monthly).
 
 ---
 
 ## 0. TL;DR
 
-A **multi-agent orchestrator on LangGraph**. A **supervisor (Opus 5)** understands the
+A **multi-agent orchestrator on LangGraph**. A **supervisor (Gemini 3 Pro)** understands the
 user's intent and then, **hop by hop, delegates to specialized subagents** — Graph (Neo4j),
 SQL (Postgres), Python (sandboxed) — **adapting to the relationships and sample data it
 discovers**. It reasons only over **digests** (schema + `describe()` + 5 sample rows) and
@@ -57,7 +58,7 @@ flowchart TD
     CACHE -->|hit| RPL["replay recorded validated queries<br/>(deterministic, no LLM)"] --> VAL
     CACHE -->|miss| SUP
 
-    subgraph LOOP["Adaptive supervisor loop (Opus 5)"]
+    subgraph LOOP["Adaptive supervisor loop (Gemini 3 Pro)"]
         SUP["supervisor<br/>observe digests + discovered relationships<br/>decide next capability OR done"]
         G["Graph agent (Neo4j)<br/>relations · what data exists · where"]
         S["SQL agent (Postgres)<br/>fetch telemetry → df/CSV on blackboard"]
@@ -71,7 +72,7 @@ flowchart TD
     SUP -->|need more supporting data| G
     SUP -->|done / budget| REC["record trajectory (clean runs only)"] --> VAL
 
-    VAL["final validation (code + Opus 5)<br/>does the answer match the query?<br/>missing info? → one targeted re-fetch"]
+    VAL["final validation (code + Gemini 3 Pro)<br/>does the answer match the query?<br/>missing info? → one targeted re-fetch"]
     VAL -->|ok| ANS([Answer: text · table · saved figure])
     VAL -->|gap, retries left| SUP
 
@@ -95,7 +96,9 @@ Reading the flow:
 5. **Visualization only if required** (§10-G): a scalar answer stays text; a series or
    comparison gets a chart.
 6. **Final validation** compares the assembled answer to the original query; on a gap, one
-   targeted re-fetch (bounded).
+   targeted re-fetch (bounded). For a **figure** answer this includes a **multimodal check**
+   — Gemini *sees* the PNG and confirms it shows what the query asked (threshold line, alert
+   window, the crossing), re-plotting if not (§10-E).
 7. **Session:** all of this is checkpointed under the **thread-id**, so a follow-up reuses
    prior artifacts and bindings (§6).
 
@@ -163,7 +166,7 @@ class CapabilityCall(BaseModel):
     capability: str                 # must exist in REGISTRY (checked before dispatch)
     inputs: dict                    # may contain $refs to prior artifacts
 
-class Decision(BaseModel):          # supervisor structured output (Opus 5)
+class Decision(BaseModel):          # supervisor structured output (Gemini 3 Pro)
     reasoning: str
     done: bool
     actions: list[CapabilityCall] = []   # ≥1; parallel if independent
@@ -172,7 +175,7 @@ def supervisor(state: DAGState) -> Command:
     if over_budget(state):                                  # §11 global budget
         return Command(goto="record")
     digests = {k: a.digest() for k, a in state["blackboard"].items()}   # NOT payloads
-    decision = decide(state["query"], digests, REGISTRY)   # Opus 5, structured, cached prefix
+    decision = decide(state["query"], digests, REGISTRY)   # Gemini 3 Pro, structured, cached prefix
     if decision.done or not decision.actions:
         return Command(goto="record")
     return Command(
@@ -242,7 +245,7 @@ flowchart LR
 ```mermaid
 flowchart TD
     subgraph CTX["In the prompt"]
-        G["① Grounding — Anthropic cache_control prefix<br/>schema cards · registry · exemplars · run_metadata"]
+        G["① Grounding — Gemini implicit cache (stable prefix first)<br/>schema cards · registry · exemplars · run_metadata"]
     end
     subgraph LG["LangGraph-owned"]
         W["② Working (blackboard) → StateGraph state + reducers"]
@@ -284,8 +287,9 @@ flowchart TD
 ```
 
 Invariants (doc 07 §10): no wall-clock / UUID / unsorted `json.dumps` in hashed or cached
-content; **deterministic `ORDER BY`** for every sample and result; `durability="sync"` for
-the determinism eval, `"async"` for the live demo.
+content; **deterministic `ORDER BY`** for every sample and result; **every LLM call pins
+`temperature=0` + a fixed `seed`** (Gemini), tightening tier-③; `durability="sync"` for the
+determinism eval, `"async"` for the live demo.
 
 ---
 
@@ -310,27 +314,54 @@ flowchart LR
 
 ---
 
-## 9. Prompting (verified against the current Claude API)
+## 9. Prompting & the LLM client (Gemini · `google-genai`)
 
-Call the **Anthropic SDK directly inside nodes** to own the cache prefix and schemas.
+Call the **Google Gen AI SDK (`google-genai`) directly inside nodes** to own the grounding
+prefix and the structured-output schema. Model IDs move monthly — confirm against
+`client.models.list()`.
 
-| Role | Model | Effort |
+| Role | Model | `thinking_level` |
 |---|---|---|
-| Supervisor (per-hop decision) + final validation | `claude-opus-5` | `high` |
-| SQL/Cypher/Python generation | `claude-opus-5` | `medium`–`high` |
-| Synthesizer / intake classifier | `claude-opus-5` | `low`–`medium` |
-| Optional eval-judge / exemplar mining | `claude-sonnet-5` | `low` (Batch 50%) |
+| Supervisor (per-hop decision) + final validation | **Gemini 3 Pro** | `high` |
+| SQL/Cypher/Python generation | **Gemini 3 Pro** | `medium`–`high` |
+| Synthesizer / intake classifier | **Gemini 3 Flash** | `low`–`medium` |
+| Self-reflection · eval-judge · exemplar mining | **Gemini 3 Flash / Flash-Lite** | `low` (Batch 50%) |
 
-- **Structured outputs** via `output_config={"format":{...}}` (or `messages.parse()`) for
-  the `Decision` and each agent's `{query, rationale}`; `strict:true` on the tool path.
-- **No `budget_tokens`** (400 on Opus 5), **no `temperature`** (removed), **no prefill**
-  (400) — all determinism leaks. Adaptive thinking on. Stream + `get_final_message()` for
-  large Coder scripts.
-- **Cache prefix:** render order `tools → system → messages`, `cache_control:{ephemeral}`
-  after grounding, volatile per-hop text last; verify `usage.cache_read_input_tokens > 0`.
+> Gemini 3 Flash now rivals prior Pro tiers — if evals hold, run generation on Flash and
+> keep Pro only for the supervisor to cut cost sharply (Flash ≈ $0.75/$3.75 per M).
+
+- **Structured outputs (native Pydantic):** pass the Pydantic model as `response_schema`
+  (`response_mime_type="application/json"`) and read the typed object off `response.parsed`.
+  Use an enum/`Literal` for the intake **scope classifier**. Cleaner than Claude's
+  `output_config` — `Decision` and each agent's `{query, rationale}` return already typed.
+- **Determinism levers (Claude lacked these):** pin **`temperature=0`**, fixed
+  **`top_p`/`top_k`**, and a fixed **`seed`**. Not bit-guaranteed across backend versions,
+  but it sharply cuts path variance → tier-③ answer determinism (§7) is *stronger* on Gemini.
+- **Reasoning:** `thinking_level` (`low`/`medium`/`high`) per role — a clean 1:1 with the
+  effort tiers. `max_output_tokens` bounds thinking+output combined, so size it for the
+  Coder's scripts. (Gemini 2.5 used `thinking_budget` tokens; 3.x uses levels.)
+- **Caching (a harness simplification):** Gemini 2.5+/3.x cache **implicitly** — keep the
+  **stable grounding prefix first** and fire a session's hops close together (we do), and
+  the multi-thousand-token prefix caches with **no cache-object/TTL lifecycle to manage**.
+  Verify `usage.total_cached_tokens`. If the hit-rate is low, escalate to **explicit context
+  caching** (`client.caches.create` → `CachedContent`, TTL) — a fallback, not the default.
+- **Guard `finish_reason`** (`SAFETY`/`MAX_TOKENS`/`RECITATION`) before reading output; set
+  `safety_settings` permissively for this trusted industrial domain (§10-A). On Gemini 3,
+  **pass thought signatures back unchanged** in multi-turn tool loops (the SDK does this).
 - **Supervisor prompt:** grounding prefix + query + current digests; prefer narrow
   capabilities over `freeform_*`; terminate explicitly (`done:true`), bounded by budget;
   reason over digests, never request raw data.
+
+### 9.1 Gemini-specific enhancements
+
+| Enhancement | What it buys |
+|---|---|
+| **Multimodal figure validation** | Gemini *sees* the Coder's PNG and confirms it answers the query — threshold line, alert window, the crossing — validating the *visualization*, not just that the code ran (§10-E) |
+| **`temperature=0` + `seed`** | stronger answer-determinism; steadier novel-query paths (§7) |
+| **Implicit caching** | grounding prefix caches automatically — no CacheManager/TTL lifecycle to build (§6) |
+| **Flash cost tiering** | Flash for cheap roles, Flash-Lite for high-volume; Pro only where reasoning is critical |
+| **Native Pydantic output** | typed `Decision`/IO off `response.parsed`; enum scope classifier |
+| **Code execution tool (rejected)** | Gemini's hosted sandbox exists but breaks offline-repro + data-separation → keep local subprocess/Docker (§8) |
 
 ---
 
@@ -343,6 +374,12 @@ Numeric telemetry is safe; **graph/maintenance text is not** — a `Tag.descript
 `Item.name`, or `MaintenanceLog` note could carry `"ignore instructions…"`. Sample rows
 are wrapped as **untrusted data**, carry no authority; the **validator is the hard gate**.
 Test: seed an injection string into a note, assert it's ignored and no unsafe query runs.
+
+**Provider safety filters (Gemini):** industrial vocabulary ("trip", "failure",
+"explosion", "abort") can trip Gemini's safety filters → a blocked prompt or
+`finish_reason=SAFETY`. Set `safety_settings` to a permissive threshold for this trusted
+domain and handle a block explicitly (one rephrase-and-retry, else surface honestly) —
+**never treat a safety block as an empty-data result** and loop on it.
 
 ### B. Query shape
 | Case | Behaviour |
@@ -377,6 +414,7 @@ Test: seed an injection string into a note, assert it's ignored and no unsafe qu
 | **Validation loop** | cap re-fetches at 1; then return with an honest gap note |
 | **LLM-judges-LLM** | back the validator with deterministic checks (asked for a max → is there an attributed scalar max?) |
 | **Hallucinated numbers** | every number in the answer must trace to an artifact's provenance; reject un-attributed numbers |
+| **Figure doesn't answer the query** | **multimodal check (Gemini vision):** feed the PNG back — "does this show [alert window + threshold crossing]?"; re-plot if not (Gemini-native; the Claude plan couldn't do this) |
 
 ### F. Session (thread-id)
 | Case | Behaviour |
@@ -418,7 +456,7 @@ is on the blackboard and state the gap. Never crash, never silently truncate.
   (`harness/context.py::assemble`) — both greppable.
 - **Digests are code-owned** (fixed pandas profile), never LLM-generated.
 - **Determinism lints:** no `datetime.now()`/`uuid4()`/unsorted dumps in grounding or
-  cache keys; a test asserts `cache_read_input_tokens>0` on the 2nd call and identical
+  cache keys; a test asserts `total_cached_tokens>0` on the 2nd call and identical
   hashes on replay.
 
 ```
@@ -447,7 +485,7 @@ tests/  test_supervisor · test_cache · test_validators · test_agents · test_
 | **ADR-4** | **Template-first Graph/SQL, free-gen fallback.** | Text2Cypher on a novel schema is flaky; leaf templating ≠ hardcoded routing. |
 | **ADR-5** | **3-tier determinism in the execution layer** (safety/cache/answer). | Reconciles adaptive routing with "correct, executable queries." |
 | **ADR-6** | **Code-owned memory on LangGraph persistence** (checkpointer + store). | Determinism/replay need memory we key, hash, version. |
-| **ADR-7** | **Anthropic SDK in nodes; manual prompt + structured outputs.** | Own the cache prefix and schema; `ChatAnthropic` is an accepted fallback. |
+| **ADR-7** | **`google-genai` SDK in nodes; manual prompt + native Pydantic structured outputs.** | Own the grounding prefix and schema; LangChain `ChatGoogleGenerativeAI` is an accepted fallback. |
 | **ADR-8** | **Sandbox is ours: subprocess+AST (demo) / Docker (prod).** | Framework sandboxes are cloud → break offline-repro + data-separation. |
 | **ADR-9** | **Global budget + graceful degradation** across nested loops. | Nested caps multiply; a run must always terminate with a best-effort, honest answer. |
 | **ADR-1b** | **Reject `deepagents`, `langgraph-supervisor`, LangChain SQL agent.** | Prebuilt ReAct helpers without a typed registry, validators, or data-separation. |
@@ -459,7 +497,7 @@ tests/  test_supervisor · test_cache · test_validators · test_agents · test_
 | # | Deliverable | Depends on | Exit test |
 |---|---|---|---|
 | 0 | **Spike:** flagship query via the adaptive supervisor on `StateGraph`; df injected, digest-only prompts | data layer | supervisor discovers alert → adapts → pulls window → plots; **no telemetry in any prompt** (trace-checked) |
-| 1 | `llm/` — client, `Decision` + capability IO schemas, cache prefix | 0 | structured `Decision` round-trips; `cache_read_input_tokens>0` on 2nd call |
+| 1 | `llm/` — client, `Decision` + capability IO schemas, cache prefix | 0 | structured `Decision` round-trips; `total_cached_tokens>0` on 2nd call |
 | 2 | `harness/` + `memory/` — context assembler, **fixed-profile digests**, artifacts, **trajectory cache**, session | 1 | digests deterministic; `$ref` resolves; **record→replay byte-stable** |
 | 3 | `tools/` — resolvers + 3 validators + 3 executors + golden templates | data layer | validators block the fuzz set; executors read-only |
 | 4 | SQL agent | 2,3 | A1,A2 green; replay ×5 identical |
@@ -482,7 +520,7 @@ LangGraph — in minutes.
 2. **`MAX_STEPS` / budget** — default **8 hops**, plus a total-LLM-call + wall-clock cap.
 3. **Trajectory record policy** — record clean runs; **require golden match** for named
    spec intents.
-4. **LLM call style** — **raw Anthropic SDK** in nodes (default) vs. `ChatAnthropic`.
+4. **LLM call style** — **raw `google-genai` SDK** in nodes (default) vs. LangChain `ChatGoogleGenerativeAI`.
 5. **Flagship Coder path** — implement **both**; demo the spec-literal (Coder → Postgres,
    [Problem.md §3.4](../../Problem.md)) flow, default to routed-via-SQL-agent.
 

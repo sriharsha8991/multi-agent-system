@@ -104,7 +104,7 @@ the only hard gate — [doc 08 §5](08-langgraph-implementation.md).)
 ```mermaid
 flowchart LR
     A["1 · Resolve<br/>entities + time<br/>(code)"] --> B["2 · Link<br/>schema / templates<br/>(retrieval)"]
-    B --> C["3 · Generate<br/>Opus 5, structured<br/>{query, rationale}"]
+    B --> C["3 · Generate<br/>Gemini 3 Pro, structured<br/>{query, rationale}"]
     C --> D["4 · Validate<br/>parse · allowlist ·<br/>dry-run (no exec)"]
     D -->|ok| E["5 · Execute<br/>read-only · timeout ·<br/>row cap"]
     D -->|reject| R

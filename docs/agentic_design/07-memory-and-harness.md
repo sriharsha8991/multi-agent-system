@@ -218,6 +218,13 @@ Why this is the right design:
 
 ## 5. Grounding memory & the prompt-cache prefix
 
+> **Provider note (Gemini):** the mechanism below is written in terms of *explicit*
+> breakpoint caching (`cache_control`, Anthropic-style). Under **Gemini** this is **implicit
+> caching** — no breakpoint object; keep the same **stable-prefix-first** discipline and
+> verify with **`usage.total_cached_tokens`** (not `cache_read_input_tokens`). Explicit
+> `client.caches.create` is the fallback only if the implicit hit-rate is low. See
+> [doc 08 §9](08-langgraph-implementation.md).
+
 Grounding memory is everything the model needs on *every* call that does **not** change
 within a session: it is rendered once and pinned in the **cached prompt prefix**.
 
@@ -346,7 +353,7 @@ memory we can hash, diff, and replay.
 > components below are the conceptual decomposition; in the definitive design they map to
 > LangGraph primitives: `ArtifactStore`→`StateGraph` state + reducers; `ReferenceResolver`→
 > `resolve_refs` in `run_step`; `ContextAssembler`→`harness/context.py::assemble`;
-> `CacheManager`→Anthropic `cache_control`; `PlanCache`/`SessionStore`→LangGraph
+> `CacheManager`→Gemini implicit cache; `PlanCache`/`SessionStore`→LangGraph
 > store/checkpointer; `Tracer`→`get_state_history`. The guarantees are unchanged.
 
 The **harness** is the deterministic, non-LLM machinery that maintains memory across
@@ -366,7 +373,7 @@ flowchart LR
         SS["SessionStore"]
         TR["Tracer<br/>append every op → replayable JSON"]
     end
-    LLM["Claude (Opus 5)"] <-->|digests + handles only| CTX
+    LLM["Gemini 3 Pro"] <-->|digests + handles only| CTX
     CTX --> CACHE
     BB <--> REF
     CLK --> CTX
