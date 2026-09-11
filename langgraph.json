@@ -1,0 +1,12 @@
+{
+  "dependencies": [
+    "./requirements.txt"
+  ],
+  "graphs": {
+    "orchestrator": "./src/mas/studio.py:orchestrator",
+    "graph_agent": "./src/mas/studio.py:graph_agent",
+    "sql_agent": "./src/mas/studio.py:sql_agent",
+    "coder_agent": "./src/mas/studio.py:coder_agent"
+  },
+  "env": "./.env"
+}

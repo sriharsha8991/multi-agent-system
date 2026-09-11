@@ -13,3 +13,12 @@ venv/
 .DS_Store
 # generated artifacts
 /artifacts/
+
+.mas_cache/
+outputs/
+
+.langgraph_api/
+
+# Figures written to the repo root by sandboxed analysis code that used a bare
+# relative filename instead of OUT (see python_analysis). Guard until that is fixed.
+/*.png
