@@ -57,7 +57,7 @@ code("""import importlib
 for label, mod in [
     ("0  Foundations (config, frozen anchor)",        "mas.config"),
     ("1  Catalog + DB layer",                          "mas.db"),
-    ("2  Safety validators + executors (tools/)",      "mas.tools"),
+    ("2  Safety validators + executors (execution/)", "mas.execution"),
     ("3  Artifacts + digests (data-separation)",       "mas.memory"),
     ("4  Specialist agents + expert prompts",          "mas.agents.specialists"),
     ("5  Orchestrator (supervisor over the team)",     "mas.orchestrator"),
@@ -98,7 +98,7 @@ md("""## Stage 2 — The safety boundary
 
 Nothing generated reaches a driver or the sandbox until it passes a validator: `sqlglot`
 for SQL, a clause denylist + READ session for Cypher, an AST allowlist for Python.""")
-code("""from mas.tools import (validate_sql, validate_cypher, validate_python,
+code("""from mas.execution import (validate_sql, validate_cypher, validate_python,
                        SqlValidationError, CypherValidationError, PyValidationError)
 
 print("SQL ok ->", validate_sql("SELECT ts, bearing_temp_1 FROM bfpa")[:80], "...")

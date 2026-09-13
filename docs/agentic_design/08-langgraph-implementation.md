@@ -31,17 +31,39 @@ a **blackboard** in LangGraph state. A **deterministic cache fast-path** replays
 seen queries byte-for-byte. Sessions persist on **thread-id**; a **final validation pass**
 checks the answer against the original query before returning.
 
+> ## ⚠️ Architecture correction (supersedes §2–§5, §13 below)
+>
+> A LangGraph audit found that much of the machinery specified below **reinvented what the
+> framework already provides**. The implementation now uses the native path, and the
+> sections describing the custom stack are superseded:
+>
+> | Was specified here (custom) | Now (native) |
+> |---|---|
+> | `Capability` dataclass + `REGISTRY` + rendered text list | `@tool` functions; docstrings become the tool descriptions |
+> | `Decision{action: CapabilityCall{inputs_json: str}}` | Native `tool_calls` with typed, framework-validated args |
+> | `$s1.result.field` / `$s2.artifact` + `resolve_refs()` | **`ToolRuntime`** state injection |
+> | `Send("run_step")` + custom `run_step` node | **`ToolNode`** (inside `create_agent`) |
+> | Custom `supervisor ⇄ run_step` loop | **`create_agent`** loop |
+> | Separate **synthesizer** node | The agent's final message when it stops calling tools |
+> | 12 narrow parameterised capabilities | 4 capable tools; the model writes expert SQL/Cypher/Python |
+> | Trajectory cache + byte-stable replay | **Dropped** — the model writes fresh queries each run, so byte-stable replay no longer applies. Determinism is now `temperature=0` + validators + independently-verified values. |
+>
+> **Unchanged and still correct:** the safety validators (§8), artifacts + digests and the
+> data-never-in-prompt rule (§4) — now enforced natively by `Command(update=blackboard)` +
+> a digest-only `ToolMessage` — the read-only executors, and the frozen anchor.
+
 | Decision | Choice |
 |---|---|
-| Substrate | **LangGraph** (`StateGraph` + `Send` + `Command`) |
-| Orchestration | **Hybrid: deterministic cache fast-path + adaptive supervisor loop** |
-| Routing | **LLM supervisor per hop**, choosing only from the typed capability registry |
-| Data to the LLM | **digests + discovered scalars/relationships only** (blackboard holds the rest) |
-| Determinism | **3-tier**: safety (always) · cache replay (byte-stable) · answer (novel) |
-| Session | **checkpointer + thread-id**; multi-turn continuity |
-| Self-correction | per-agent self-reflection (≤2) → deterministic validator → repair (≤2); a **global budget** caps the whole run |
+| Substrate | **LangGraph / LangChain `create_agent`** (model ⇄ `ToolNode` loop) |
+| Tools | 4 capable tools: `explore_schema`, `graph_query`, `sql_query`, `python_analysis` |
+| Routing | The model's native tool-calling — no custom registry or routing protocol |
+| Data to the LLM | payload → `blackboard` in state via `Command`; **digest only** → `ToolMessage` |
+| Payload access | **`ToolRuntime`** injects state into tools; never through the prompt |
+| Prompting | Expert framing + live schema grounding; rich per-tool docstrings; no output limit |
+| Answer | The agent's final message (no synthesizer) |
+| Session | `checkpointer` + `thread_id` |
 | Sandbox | subprocess+AST (demo) / Docker (prod) — **ours**, not a cloud sandbox |
-| Rejected | `deepagents`, `langgraph-supervisor`, LangChain SQL agent (see §13) |
+| Rejected | `deepagents`, `langgraph-supervisor` (see §13) |
 
 ---
 
@@ -320,15 +342,18 @@ Call the **Google Gen AI SDK (`google-genai`) directly inside nodes** to own the
 prefix and the structured-output schema. Model IDs move monthly — confirm against
 `client.models.list()`.
 
-| Role | Model | `thinking_level` |
+| Role | Model (config field) | Default |
 |---|---|---|
-| Supervisor (per-hop decision) + final validation | **Gemini 3 Pro** | `high` |
-| SQL/Cypher/Python generation | **Gemini 3 Pro** | `medium`–`high` |
-| Synthesizer / intake classifier | **Gemini 3 Flash** | `low`–`medium` |
-| Self-reflection · eval-judge · exemplar mining | **Gemini 3 Flash / Flash-Lite** | `low` (Batch 50%) |
+| Supervisor (per-hop decision) + query generation + final validation | `gemini_reasoning_model` | **`gemini-3.8-flash`** |
+| Synthesizer / intake classifier / self-reflection | `gemini_fast_model` | **`gemini-3.5-flash`** |
+| High-volume · eval-judge · exemplar mining | `gemini_lite_model` | **`gemini-3.5-flash-lite`** (Batch 50%) |
 
-> Gemini 3 Flash now rivals prior Pro tiers — if evals hold, run generation on Flash and
-> keep Pro only for the supervisor to cut cost sharply (Flash ≈ $0.75/$3.75 per M).
+> **Researched against [ai.google.dev/gemini-api/docs/models]:** Gemini 3.x is the current
+> generation (2.5 is prior-gen; 2.0 is shut down). Google recommends **`gemini-3.8-flash`
+> for autonomous agents**, and Flash-tier now rivals prior Pro tiers — so the reasoning
+> role runs on Flash, not a Pro model, cutting cost sharply. `gemini-3.1-pro-preview` is
+> available (preview) if a true Pro is ever wanted. All IDs are `.env`-configurable; verify
+> with `client.models.list()`.
 
 - **Structured outputs (native Pydantic):** pass the Pydantic model as `response_schema`
   (`response_mime_type="application/json"`) and read the typed object off `response.parsed`.

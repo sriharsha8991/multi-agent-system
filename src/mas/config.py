@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timedelta, timezone
 from functools import cached_property, lru_cache
+from pathlib import Path
 
 import numpy as np
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -61,6 +62,32 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str = "mas_neo4j_pw"
     neo4j_database: str = "neo4j"
+
+    # ── llm (gemini) ─────────────────────────────────────────────────────
+    # Gemini 3.x is the current generation (2.5 is prior-gen; 2.0 is shut down).
+    # Google recommends gemini-3.8-flash for autonomous agents, and Flash-tier now
+    # rivals prior Pro tiers (doc 08 §9) — so the reasoning role uses it, not a Pro.
+    # Role-based, all configurable via .env; verify with client.models.list().
+    gemini_api_key: str = ""
+    gemini_reasoning_model: str = "gemini-3.7-flash"    # supervisor, query generation
+    gemini_fast_model: str = "gemini-3.7-flash"         # synthesizer, intake, self-reflection
+    gemini_lite_model: str = "gemini-3.7-flash"    # high-volume, eval-judge
+    llm_seed: int = 7  # pinned with temperature=0 for reproducibility (doc 08 §7)
+    # Sampling is an experiment knob (doc 10, O8), not a settled choice: Gemini 3 guidance
+    # is to keep the default temperature 1.0, while this system has run at 0. Compare the
+    # two on fact pass^k before changing the default. Empty/None → provider default.
+    gemini_temperature: float | None = 0.0
+    gemini_seed: int | None = None
+    specialist_thinking_budget: int | None = None
+
+    # ── python sandbox (doc 10, S4) ──────────────────────────────────────
+    # "subprocess": a separate interpreter per delegation with a hard timeout (default,
+    # works everywhere). "docker": the same worker inside a no-network, read-only container
+    # built from docker/py-sandbox.Dockerfile — the real isolation boundary.
+    py_sandbox_backend: str = "subprocess"
+    py_sandbox_timeout_s: int = 60
+    py_sandbox_image: str = "mas-py-sandbox:latest"
+    py_sandbox_memory: str = "1g"
 
     # ── derived: time ────────────────────────────────────────────────────
     @cached_property
@@ -134,6 +161,37 @@ class Settings(BaseSettings):
             "currency": self.currency,
             "generator_version": generator_version,
         }
+
+
+def load_env_file(path: str | None = None) -> list[str]:
+    """Export ``.env`` into ``os.environ``; returns the names actually set.
+
+    ``Settings`` reads ``.env`` straight into *this object* and never touches the process
+    environment — which is fine for our own config, but invisible to libraries configured
+    purely through environment variables. LangSmith is the one that bites: without this, a
+    run started from a script or a notebook is **silently untraced**, while the same graph
+    run under ``langgraph dev`` traces fine (the CLI exports ``.env`` itself, via the
+    ``"env"`` key in ``langgraph.json``).
+
+    Existing environment variables win, so an explicit export still overrides the file.
+    """
+    import os
+
+    env_path = Path(path) if path else Path(__file__).resolve().parents[2] / ".env"
+    if not env_path.exists():
+        return []
+
+    applied: list[str] = []
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if key and value and key not in os.environ:
+            os.environ[key] = value
+            applied.append(key)
+    return applied
 
 
 @lru_cache(maxsize=1)

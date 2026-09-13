@@ -1,15 +1,17 @@
 """Run the golden-dataset evaluation against the live orchestrator.
 
-Executes each golden query through the real agents, scores routing/value/determinism, and
-writes eval/report.md + eval/report.json.
+Executes each golden query k times through the real agents and scores routing, value,
+pass^k and information determinism (facts, answer numbers, windows). Writes
+eval/report[-label].md and .json.
 
-    python scripts/run_eval.py
+    python scripts/run_eval.py [label] [--k 3] [--cases A1,A4]
 
-Makes live Gemini calls and hits Postgres/Neo4j. Determinism = each query run twice; the
-second run replays the recorded trajectory (no supervisor LLM) for the cached cases.
+Makes live Gemini calls (k × cases full runs) and hits Postgres/Neo4j. The report header pins
+the data snapshot (run_metadata) and the model sampling config, so runs are comparable.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -22,49 +24,67 @@ try:
 except Exception:
     pass
 
-from mas.eval import golden as G          # noqa: E402
-from mas.orchestrator import run          # noqa: E402
+from mas.config import get_settings        # noqa: E402
+from mas.db import postgres                 # noqa: E402
+from mas.eval import golden as G            # noqa: E402
+from mas.orchestrator import run            # noqa: E402
+
+
+def snapshot() -> dict:
+    conn = postgres.connect(reader=True)
+    try:
+        meta = dict(postgres.fetchall(conn, "SELECT key, value FROM run_metadata"))
+    finally:
+        conn.close()
+    return {k: meta.get(k) for k in ("generator_version", "master_seed", "now_anchor",
+                                     "window_start", "window_end")}
+
+
+def model_config() -> dict:
+    s = get_settings()
+    return {"model": s.gemini_reasoning_model, "temperature": s.gemini_temperature,
+            "seed": s.gemini_seed, "specialist_thinking_budget": s.specialist_thinking_budget,
+            "sandbox": s.py_sandbox_backend}
 
 
 def main() -> int:
-    # the agent writes fresh queries each run; determinism is measured on answer values
+    ap = argparse.ArgumentParser()
+    ap.add_argument("label", nargs="?", default="")
+    ap.add_argument("--k", type=int, default=3)
+    ap.add_argument("--cases", default="", help="comma-separated case ids to run")
+    args = ap.parse_args()
+
     data = G.load_golden(ROOT / "eval" / "golden_dataset.json")
+    wanted = {c.strip() for c in args.cases.split(",") if c.strip()}
+    cases = [c for c in data["cases"] if not wanted or c["id"] in wanted]
+    meta = {"snapshot": snapshot(), "model": model_config()}
+    if data.get("meta", {}).get("snapshot") and data["meta"]["snapshot"] != meta["snapshot"]:
+        print("WARNING: the database snapshot differs from the one the golden set was built on")
 
-    def _safe_run(q: str):
-        try:
-            return run(q), None
-        except Exception as e:  # a single hard failure must not abort the eval
-            return None, str(e)[:140]
+    scored = []
+    for case in cases:
+        print(f"[{case['id']}] {case['query'][:80]}")
+        runs = []
+        for i in range(args.k):
+            try:
+                runs.append(run(case["query"]))
+            except Exception as e:  # a single hard failure must not abort the eval
+                print(f"    run {i + 1} ERROR: {str(e)[:160]}")
+                runs.append({"messages": [], "tool_events": [{"tool": "run", "error": str(e)[:300]}]})
+        r = G.score_case(case, runs)
+        scored.append(r)
+        print(f"    route={'ok' if r['route_ok'] else 'X'} value={r['value_rate']:.0%} "
+              f"pass^k={r['pass_k']} facts_same={r['fact_det']} answer_same={r['answer_det']} "
+              f"({r['value_detail']})")
 
-    results = []
-    for case in data["cases"]:
-        q = case["query"]
-        print(f"[{case['id']}] {q[:70]}...")
-        first, err = _safe_run(q)
-        if first is None:
-            results.append({
-                "id": case["id"], "kind": case["kind"], "route": [],
-                "expected_tools": sorted(G.expected_tools(case)), "route_ok": False,
-                "value_ok": False, "value_detail": f"run error: {err}", "det_ok": None,
-                "steps": 0,
-            })
-            print(f"    ERROR: {err}")
-            continue
-        second, _ = _safe_run(q)  # determinism: cached cases replay with no supervisor LLM
-        r = G.score_case(case, first, second)
-        results.append(r)
-        print(f"    route={'ok' if r['route_ok'] else 'X '} "
-              f"value={'ok' if r['value_ok'] else 'X '} "
-              f"det={'ok' if r['det_ok'] else 'X '}  ({r['value_detail']})")
-
-    report_md = G.format_report(results, data.get("meta"))
-    (ROOT / "eval" / "report.md").write_text(report_md, encoding="utf-8")
-    (ROOT / "eval" / "report.json").write_text(
-        json.dumps({"summary": G.summarize(results), "results": results}, indent=2),
-        encoding="utf-8",
-    )
-    print("\n" + report_md)
-    print("\nwrote eval/report.md and eval/report.json")
+    stem = f"report-{args.label}" if args.label else "report"
+    md = G.format_report(scored, meta)
+    (ROOT / "eval" / f"{stem}.md").write_text(md, encoding="utf-8")
+    (ROOT / "eval" / f"{stem}.json").write_text(
+        json.dumps({"meta": meta, "summary": G.summarize(scored), "results": scored}, indent=2,
+                   default=str), encoding="utf-8")
+    print("\n" + md)
+    print(f"\nwrote eval/{stem}.md and eval/{stem}.json")
     return 0
 
 
