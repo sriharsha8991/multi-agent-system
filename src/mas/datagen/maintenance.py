@@ -13,8 +13,8 @@ interesting. Cost identities are enforced so both natural Cypher formulations of
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from .. import catalog
 from ..config import Settings, get_settings
@@ -200,7 +200,6 @@ def _ensure_all_items_consumed(logs: list[dict], consumed: list[dict],
     orphans = [code for code in imap if code not in used]
     if not orphans:
         return
-    by_wo = {L["work_order_id"]: L for L in logs}
     # historical logs only (event/scheduled logs keep their exact planned items)
     hist = [L for L in logs if L["related_alert_id"] is None]
     if not hist:

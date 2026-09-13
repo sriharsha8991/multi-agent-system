@@ -12,7 +12,6 @@ are all before the telemetry window, so the latest bfpa alert is still E1 (DG-1)
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import timedelta, timezone
 
 import numpy as np
@@ -20,7 +19,6 @@ import numpy as np
 from .. import catalog
 from ..catalog import SYSTEM_META
 from .build_telemetry import GeneratedData
-from .events import EventRecord
 
 DEADBAND = 0.02          # 2% of setpoint
 ON_DELAY_S = 180         # 3 min: suppresses single-sample instrument spikes
@@ -53,7 +51,7 @@ def _severity_priority(system: str, family: str, level: str, peak: float) -> tup
     return "medium", "medium"
 
 
-def _scan_side(arr: np.ndarray, setpoint: float, sethi: float | None,
+def _scan_side(arr: np.ndarray, setpoint: float,
                sample_s: int, high_side: bool) -> list[tuple[int, int, float]]:
     """Return merged (start_idx, end_idx, peak) excursions past ``setpoint``."""
     on_steps = max(3, ON_DELAY_S // sample_s)
@@ -122,7 +120,7 @@ def detect(data: GeneratedData) -> list[dict]:
             ):
                 if setp is None:
                     continue
-                for a, b, peak in _scan_side(arr, setp, None, sample_s, is_high):
+                for a, b, peak in _scan_side(arr, setp, sample_s, is_high):
                     # promote to hi_hi / lo_lo if the extreme setpoint is crossed
                     lvl = level
                     thr = setp

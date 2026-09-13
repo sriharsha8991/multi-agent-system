@@ -350,7 +350,6 @@ def g18(cx: Ctx) -> GateResult:
 
 
 def g19(cx: Ctx) -> GateResult:  # DG-1
-    st = cx.settings
     latest = _cypher1(cx,
         "MATCH (a:Alert {system:'bfpa'}) WHERE a.has_telemetry = true "
         "RETURN a.tag_name AS tag, a.threshold_value AS thr, "

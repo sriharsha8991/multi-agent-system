@@ -24,7 +24,7 @@ SENSOR_CATALOG_COLS = [
 
 
 def table_ddl(system: str) -> str:
-    cols = [f'  "ts" TIMESTAMPTZ PRIMARY KEY']
+    cols = ['  "ts" TIMESTAMPTZ PRIMARY KEY']
     for t in catalog.tags_for(system):
         cols.append(f'  "{t.tag_name}" DOUBLE PRECISION')
     body = ",\n".join(cols)

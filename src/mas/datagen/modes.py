@@ -56,7 +56,6 @@ class TimeGrid:
         secs = (axis - axis[0]).astype("timedelta64[s]").astype(np.int64)
         day_float = secs / 86400.0
         day_index = np.floor(day_float).astype(int)
-        day0 = axis[0].astype("datetime64[D]")
         hour = (axis - axis.astype("datetime64[D]")).astype("timedelta64[s]").astype(np.int64) / 3600.0
         # weekday of each timestamp: days since epoch mod 7 (1970-01-01 was Thursday=3)
         abs_day = axis.astype("datetime64[D]").astype(int)

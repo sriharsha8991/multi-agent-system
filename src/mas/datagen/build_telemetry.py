@@ -7,7 +7,7 @@ detector and validators run against them without a round-trip.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timezone
 
 import numpy as np

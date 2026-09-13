@@ -15,7 +15,7 @@ import numpy as np
 from .. import catalog
 from ..catalog import SYSTEM_META, TagSpec
 from . import dsp
-from .modes import GenContext, OFFLINE
+from .modes import GenContext
 
 
 @dataclass(slots=True)
@@ -165,7 +165,7 @@ def _h_lube_oil_pressure(t, P, ctx):
 
 
 def _h_vibration_velocity(t, P, ctx):
-    lo, hi = t.normal_min, t.normal_max
+    lo = t.normal_min
     base = np.where(P.running > 0, 1.0 + 1.7 * P.nf, 0.35 * (lo + 0.5))
     return np.clip(base, lo * 0.4, None)
 

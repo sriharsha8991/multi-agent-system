@@ -104,6 +104,27 @@ def tag_count(system: str) -> int:
     return len(tags_for(system))
 
 
+def search_tags(term: str, system: str | None = None) -> list[TagSpec]:
+    """Tags matching a plain-language term, on one system or all.
+
+    Every word of the term must appear (underscores read as spaces), so 'bearing
+    temperature' finds `bearing_temp_1` in family `temperature`. Name/family/unit hits win;
+    descriptions are only a fallback — a word like 'steam' appears in 60 descriptions and
+    would drown the answer.
+    """
+    words = term.strip().lower().replace("_", " ").split()
+    if not words:
+        return []
+    pool = tags_for(system) if system else all_tags()
+
+    def _hit(text: str) -> bool:
+        text = text.lower().replace("_", " ")
+        return all(w in text for w in words)
+
+    return ([t for t in pool if _hit(f"{t.tag_name} {t.family} {t.unit}")]
+            or [t for t in pool if _hit(t.description)])
+
+
 def items() -> list[ItemSpec]:
     return _items()
 
