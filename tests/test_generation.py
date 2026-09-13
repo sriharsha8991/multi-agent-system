@@ -60,7 +60,7 @@ def test_determinism_same_arrays_twice():
 
 
 def test_operating_regions_separable(data):
-    sk = pytest.importorskip("sklearn")
+    pytest.importorskip("sklearn")
     from sklearn.cluster import KMeans
     from sklearn.metrics import silhouette_score
     a = data.arrays["bfpa"]
