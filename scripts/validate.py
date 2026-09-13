@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import _bootstrap  # noqa: F401
+import _bootstrap  # noqa: F401 - side-effect import: puts src/ on sys.path
 import sys
 
 from mas.config import get_settings

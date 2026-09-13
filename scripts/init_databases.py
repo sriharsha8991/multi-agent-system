@@ -7,7 +7,7 @@ Neo4j constraints/indexes. Does NOT populate data (see seed_all.py).
 
 from __future__ import annotations
 
-import _bootstrap  # noqa: F401
+import _bootstrap  # noqa: F401 - side-effect import: puts src/ on sys.path
 import time
 
 from mas import catalog

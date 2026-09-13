@@ -12,11 +12,11 @@ against empty databases works on its own.
 
 from __future__ import annotations
 
-import _bootstrap  # noqa: F401
+import _bootstrap  # noqa: F401 - side-effect import: puts src/ on sys.path
 import time
 
 from mas.config import get_settings
-from mas.db import constraints, ddl
+from mas.db import ddl
 from mas.db import neo4j as neo
 from mas.datagen import alerts as al
 from mas.datagen import build_telemetry as bt
