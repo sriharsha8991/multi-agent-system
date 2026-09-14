@@ -71,6 +71,24 @@ flowchart TB
     K --> A["Answer to user"]
 ```
 
+The work follows the data. **The orchestrator reads the intent and splits the question
+into facts. graph_agent narrows** which tags, alerts and windows matter. **sql_agent retrieves**
+exactly that data. **coder_agent analyses it and draws** the figures. A stage the question
+does not need is skipped: "max bearing temperature yesterday" goes straight to sql_agent,
+because the glossary already names the tags.
+
+```mermaid
+flowchart LR
+    Q["Question"] --> I["Orchestrator:<br/>intent, split into slots"]
+    I --> GN["graph_agent narrows:<br/>tags that matter,<br/>alert window, work orders"]
+    GN -->|"$s1.tags, $s1.alert_id"| SR["sql_agent retrieves:<br/>only those tags,<br/>in that window"]
+    SR -->|"$s2.artifacts"| CV["coder_agent:<br/>analysis and figures"]
+    GN -->|"$s1.artifacts<br/>alert records"| CV
+    CV --> A["Answer with<br/>named figures"]
+    I -.->|"signal already clear"| SR
+    I -.->|"history only"| GN
+```
+
 Four things make this work, and each has its own section:
 
 | Idea | In one sentence | Section |
@@ -540,7 +558,7 @@ because alert and maintenance history reaches back ~2 years.
 
 | Slot situation | Tags |
 |---|---|
-| explicit `tags` (or `$sN.tags`) | exactly those |
+| explicit `tags` (or `$sN.tags` narrowed by graph_agent) | those first; any `concepts` on the slot add their tags as context (e.g. narrowed vibration tags + `load`) |
 | `concepts` on a **measure** slot | every matching tag per system (e.g. all 14 bearing temperatures) |
 | `concepts` on a **derive** slot | the concept's **primary** tag per system (e.g. load → `motor_power`) |
 | more than 60 tags | refused — name a narrower concept |
@@ -964,6 +982,13 @@ The craft patterns its story teaches:
 | **In scope** | `df` (first artifact), `dfs` ({id: DataFrame}), `pd`, `np`, `plt`; importable scipy, sklearn, statistics, math, datetime, json, collections, itertools. Variables persist across calls in the same step. |
 | **Returns** | stdout (≤4,000 chars) and `figures: [{artifact_id, path, title}]`. |
 | **Checked** | Import allowlist, no filesystem/network/os/sys, `random_state=0` on randomised estimators, hard timeout per call. |
+
+**Figure names.** The figure's title names it. The file becomes
+`outputs/figures/<id>_<title-slug>.png`, e.g.
+`f7_bfp-a-bearing-temperatures-around-alm-bfpa-0009.png`: the id keeps it unique and sortable,
+and the slug says what it shows. The coder is told to title figures as
+"<system> <what> <when/event>". An untitled figure is saved as `<id>_untitled.png`, and the tool
+tells the coder to add a title and redraw.
 
 **Figures.** Every figure the code draws is kept — whether it calls `plt.savefig(OUT)`, saves
 under another name, or never saves at all — up to 8 per call, each with its own artifact id.

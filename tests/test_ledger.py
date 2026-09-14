@@ -250,3 +250,55 @@ def test_footers_list_evidence_and_gaps():
     text = ledger.footers(st)
     assert "**Evidence:** f1 ← t1 (s1)" in text
     assert "**Gaps:** f2 (the figure) — blocked" in text
+
+
+# ── the prompt's worked examples must be plans code accepts ───────────────────
+def _example_plan(slots, steps, question):
+    st = state_with(slots=[], steps={}, question=question)
+    return ledger.plan_problems([Slot(**s) for s in slots], [PlanStep(**p) for p in steps], st)
+
+
+def test_prompt_example_event_then_plot_is_accepted():
+    slots = [
+        {"slot_id": "f1", "kind": "lookup", "ask": "latest BFP-A alert with telemetry: id, tag, window, peak",
+         "systems": ["bfpa"], "aggregation": "latest", "needs": ["entity", "time", "value"]},
+        {"slot_id": "f2", "kind": "measure", "ask": "series of the alert's tag in the alert window, for a plot",
+         "systems": ["bfpa"], "tags": ["$s1.tags"], "aggregation": "series", "needs": ["entity"],
+         "time": {"around_alert": "$s1.alert_id"}},
+        {"slot_id": "f3", "kind": "derive", "ask": "plot: the series vs alarm_hi/hihi, alert window shaded, peak marked",
+         "systems": ["bfpa"], "tags": ["$s1.tags"], "aggregation": "figure", "needs": ["figure"]}]
+    steps = [{"step_id": "s1", "agent": "graph_agent", "slots": ["f1"]},
+             {"step_id": "s2", "agent": "sql_agent", "slots": ["f2"], "depends_on": ["s1"]},
+             {"step_id": "s3", "agent": "coder_agent", "slots": ["f3"], "depends_on": ["s1", "s2"]}]
+    assert _example_plan(slots, steps, "What is the latest alert on BFP-A? Plot the bearing "
+                                       "temperature during that alert window.") == []
+
+
+def test_prompt_example_diagnosis_narrow_retrieve_analyse_is_accepted():
+    slots = [
+        {"slot_id": "f1", "kind": "lookup", "ask": "turbine vibration tags ranked by alert count in the "
+         "telemetry window, with setpoints and peaks", "systems": ["turbine"], "concepts": ["vibration"],
+         "aggregation": "rank", "needs": ["list", "entity"]},
+        {"slot_id": "f2", "kind": "lookup", "ask": "turbine work orders linked to or following those "
+         "alerts: class, failure mode, dates", "systems": ["turbine"], "aggregation": "list", "needs": ["list"]},
+        {"slot_id": "f3", "kind": "measure", "ask": "hourly series of the narrowed vibration tags plus load, "
+         "for trend and correlation", "systems": ["turbine"], "tags": ["$s1.tags"], "concepts": ["load"],
+         "aggregation": "series", "needs": ["entity"]},
+        {"slot_id": "f4", "kind": "derive", "ask": "when vibration rose, whether it tracks load, margin to "
+         "alarm_hi; figure of vibration and load with alarm lines", "systems": ["turbine"],
+         "tags": ["$s1.tags"], "concepts": ["load"], "aggregation": "analysis", "needs": ["value", "figure"]}]
+    steps = [{"step_id": "s1", "agent": "graph_agent", "slots": ["f1", "f2"]},
+             {"step_id": "s2", "agent": "sql_agent", "slots": ["f3"], "depends_on": ["s1"]},
+             {"step_id": "s3", "agent": "coder_agent", "slots": ["f4"], "depends_on": ["s1", "s2"]}]
+    assert _example_plan(slots, steps, "Why is the turbine vibrating?") == []
+
+
+def test_narrowed_tags_and_context_concepts_combine():
+    steps = {"s1": {"agent": "graph_agent", "status": "done",
+                    "handoff": {"tags": ["turbine.vibration_overall", "turbine.vibration_x_1"]}}}
+    rec = {"slot_id": "f3", "kind": "measure", "tags": ["$s1.tags"], "concepts": ["load"],
+           "systems": ["turbine"]}
+    specs, note = ledger.linked_tags(rec, steps)
+    names = [f"{t.system}.{t.tag_name}" for t in specs]
+    assert names == ["turbine.vibration_overall", "turbine.vibration_x_1", "turbine.gross_power"]
+    assert note.startswith("2 given")

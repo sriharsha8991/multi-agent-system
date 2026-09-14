@@ -134,8 +134,11 @@ def _render(task: Task, agent: str, slots: dict, windows: dict, blackboard: dict
                 f"{s} ({SYSTEM_META[s]['display_name']})" for s in rec["systems"]))
         specs = rec.get("_tag_specs") or []
         if specs:
+            use = ("use their units for axes and their setpoints for threshold lines"
+                   if agent == "coder_agent" else
+                   "add related tags only if they sharpen the answer, and say so")
             lines.append(f"  tags ({len(specs)}; {rec.get('_link_note')}) — the slot is about "
-                         "these; add related tags only if they sharpen the answer, and say so:")
+                         f"these; {use}:")
             lines += _tag_block(specs)
         elif rec.get("concepts"):
             lines.append(f"  concepts: {', '.join(rec['concepts'])}")

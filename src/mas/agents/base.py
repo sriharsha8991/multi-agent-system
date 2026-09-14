@@ -12,7 +12,6 @@ from langchain.agents import AgentState
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from ..config import get_settings
-from ..memory.artifacts import Artifact
 
 
 def merge_blackboard(left: dict | None, right: dict | None) -> dict:
@@ -63,7 +62,9 @@ class MASState(AgentState):
     * ``checks`` — notes from the answer guard (e.g. that the pending-slot nudge was used).
     """
 
-    blackboard: Annotated[dict[str, Artifact], merge_blackboard]
+    #: artifact id → its JSON-safe digest. Payloads (DataFrames, PNGs) live in ``memory.store``;
+    #: typing this as the artifact classes broke Studio's state schema (a DataFrame has none).
+    blackboard: Annotated[dict[str, dict], merge_blackboard]
     tool_events: Annotated[list[dict], operator.add]
     plan: Annotated[dict[str, dict], merge_keyed]
     slots: Annotated[dict[str, dict], merge_keyed]

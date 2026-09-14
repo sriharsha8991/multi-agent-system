@@ -19,10 +19,11 @@ layer are implemented.
 - **Python 3.11+** installed
 - **Docker & Docker Compose** installed and running
 - **Google Gemini API Key** ([Get a free key from Google AI Studio](https://aistudio.google.com/apikey))
-
+- **LangSmith API Key** - A free langsmith api key for tracing anf visualising locally using langraph dev on dedicated port
+All though a paid Tier 3 key is preferred for faster responses.
 ---
 
-### Option A: Automated One-Command Setup (Recommended)
+### Option A: Automated One-Command Setup 
 
 Run the automated setup script which handles environment setup, dependencies, spinning up Docker containers, database initialization, seed data generation, and verification:
 
@@ -63,7 +64,7 @@ Copy `.env.example` to `.env` and set your Gemini API key:
 ``` 
 cp .env.example .env
 ```
-Edit `.env` and set `GEMINI_API_KEY=your_actual_api_key_here`.
+Edit `.env` and set `GEMINI_API_KEY=your_actual_api_key_here`.(along with langsmithapaikey )
 
 #### Step 3: Install Python Dependencies
 ``` 
@@ -111,7 +112,7 @@ You can test and inspect the full multi-agent workflow in real-time using LangGr
 ``` 
 langgraph dev --port 2025
 ```
-*(If `langgraph` command is not found, ensure virtualenv is active or use `npx @langchain/langgraph-cli dev --port 2025`)*
+*(If `langgraph` command is not found, ensure virtualenv is active )*
 
 #### 2. Open the Chat Interface:
 Open the local URL displayed in your terminal (typically `http://localhost:2025` or the Studio browser link) to access the interactive web interface.
@@ -153,9 +154,20 @@ python scripts/ask.py "Which BFP ran hotter over the last 7 days?" --trace
 
 ### Method 3: Interactive Jupyter Notebook
 
-Launch the step-by-step walkthrough notebook to inspect intermediate outputs:
-``` 
+```bash
 jupyter notebook notebooks/demonstration.ipynb
+```
+
+The notebook is a few cells over the helpers in `mas.notebook`, which work in any kernel:
+
+```python
+from mas.notebook import ask, show_tool_calls, show_figures, show_plan, show_data, run_summary
+
+result = ask("Why is the turbine vibrating?")   # answer, figures, plan and every tool call
+show_tool_calls(result)     # each delegation: brief, status, tokens, and its SQL / Cypher / Python
+show_figures(result)        # every image the run produced, titled, with its file path
+show_plan(result)           # the ledger: slots, steps, status, artifacts
+show_data(result, "t4")     # the rows behind a table artifact
 ```
 
 ## How the team is put together
@@ -273,7 +285,7 @@ src/mas/
   studio.py       graph entrypoints for `langgraph dev`
 tests/            catalog + generation (no DB), full-gate suite (needs DBs),
                   agent budget invariants
-notebooks/        demonstration.ipynb — stage-by-stage walkthrough
+notebooks/        demonstration.ipynb — ask a question, see tool calls and figures (mas.notebook)
 eval/             golden_dataset.json + generated report
 ```
 
@@ -291,7 +303,7 @@ eval/             golden_dataset.json + generated report
 | Build the golden dataset (DB only) | `python scripts/build_golden.py` |
 | Score it: pass^k + determinism (live Gemini) | `python scripts/run_eval.py <label> --k 3` |
 | Regenerate the data dictionary | `python scripts/gen_data_dictionary.py` |
-| Regenerate the notebook | `python scripts/build_notebook.py` |
+| Regenerate the notebook (add `--execute` to run it with Gemini) | `python scripts/build_notebook.py` |
 | LangGraph Studio | `langgraph dev --port 2025` |
 | Run any task in Docker | `docker compose run --rm app <command>` |
 | Stop databases | `docker compose down` (add `-v` to destroy seeded data) |
@@ -311,6 +323,7 @@ eval/             golden_dataset.json + generated report
 | [09-implementation-steps](docs/agentic_design/09-implementation-steps.md) | Build order and acceptance criteria |
 | [10-orchestration-and-determinism-plan](docs/agentic_design/10-orchestration-and-determinism-plan.md) | Why the ledger and strict rules exist — research, roadmap, and why recipes were removed |
 | [11-agents-architecture-explained](docs/agentic_design/11-agents-architecture-explained.md) | **Start here:** every term, tool, rule and limit of the agent team, with diagrams |
+| [12-presentation-notes](docs/12-presentation-notes.md) | End-to-end notes for the final presentation: problem, data generation, MAS internals with payloads, guardrails, setup |
 
 ## Requirements
 

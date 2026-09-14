@@ -26,6 +26,9 @@ REGISTRY: dict[str, Capability] = {
         agent="graph_agent",
         summary="Neo4j Metadata & History: Tag/sensor catalog metadata & setpoints, alert history, "
                 "maintenance work orders, spare parts consumption & costs. "
+                "NARROWS the data for later steps: which tags matter for a symptom (alarm "
+                "history, family, setpoints), the alert and its window — handed over as "
+                "$sN.tags / $sN.alert_id. "
                 "STRICT BOUNDARY: Does NOT have sensor telemetry or time-series values.",
         slot_kinds=frozenset({"lookup"}),
         aggregations=frozenset({"value", "count", "sum", "latest", "list", "rank"}),
@@ -92,6 +95,11 @@ def render_team() -> str:
         "- **lookup** slots -> ONLY **graph_agent** (Neo4j: metadata, alerts, work orders, spare parts)",
         "- **measure** slots -> ONLY **sql_agent** (PostgreSQL: sensor time-series values & telemetry stats)",
         "- **derive** slots -> ONLY **coder_agent** (Python: stats, plots, figures on fetched artifacts)",
+        "",
+        "### Data flow",
+        "graph_agent narrows (which tags, which alert window) -> sql_agent retrieves exactly that "
+        "data -> coder_agent analyses it and draws the figures. Skip a stage the question does "
+        "not need.",
         "",
         "### Team Capabilities & Operational Constraints"
     ]

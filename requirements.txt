@@ -29,3 +29,9 @@ sqlglot>=25
 # ── local dev: `langgraph dev` (LangGraph Studio) + tests ──
 langgraph-cli[inmem]>=0.2
 pytest>=7.4
+
+# ── demonstration notebook: open it, and scripts/build_notebook.py ──
+notebook>=7
+ipykernel>=6.25
+nbformat>=5.9
+nbclient>=0.9

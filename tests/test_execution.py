@@ -261,3 +261,14 @@ def test_timewin_delegates_to_frozen_clock():
     ref = datetime(2026, 9, 7, tzinfo=timezone.utc)
     t0, t1 = resolve_window("yesterday", ref=ref)
     assert t0.startswith("2026-09-06") and t1.startswith("2026-09-07")
+
+
+def test_figure_files_are_named_by_id_and_title():
+    from mas.agents.tools import figure_filename
+
+    assert figure_filename("f7", "BFP-A bearing temperatures around ALM-BFPA-0009 (03 Sep 00:26–04:10 UTC)") \
+        == "f7_bfp-a-bearing-temperatures-around-alm-bfpa-0009-03-sep-00-26-04-10-utc.png"
+    long = figure_filename("f2", "Turbine vibration overall versus gross power across the whole telemetry window with alarm lines")
+    assert long.startswith("f2_turbine-vibration") and len(long) <= len("f2_") + 70 + 4
+    assert not long[:-4].endswith("-")
+    assert figure_filename("f3", "") == "f3_untitled.png"

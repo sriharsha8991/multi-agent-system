@@ -170,23 +170,23 @@ def resolve_ref(ref: str, steps: dict) -> list[str]:
 def linked_tags(slot: dict, steps: dict) -> tuple[list, str]:
     """Catalog tags a slot is about, and a one-line note on how they were chosen.
 
-    Explicit tags (and ``$sN.tags``) win. Otherwise each concept resolves on each system:
-    measure slots use every matching tag, derive slots the concept's primary tag — so a
-    clustering question uses the same features on every run.
+    Explicit tags (and ``$sN.tags`` narrowed down by an earlier step) come first. Concepts add
+    to them — so "the vibration tags graph_agent narrowed, plus load for context" is one slot.
+    Each concept resolves on each system: measure slots use every matching tag, derive slots
+    the concept's primary tag — so a clustering question uses the same features on every run.
     """
     names: list[str] = []
     for item in slot.get("tags") or []:
         names += resolve_ref(item, steps) if item.startswith("$") else [item]
-    if names:
-        specs = []
-        for n in dict.fromkeys(names):
-            system, _, tag = n.partition(".")
-            spec = tag_map(system).get(tag) if system in systems() else None
-            if spec is None:
-                raise ValueError(f"unknown tag {n}")
-            specs.append(spec)
-        return specs, "given"
     specs, notes = [], []
+    for n in dict.fromkeys(names):
+        system, _, tag = n.partition(".")
+        spec = tag_map(system).get(tag) if system in systems() else None
+        if spec is None:
+            raise ValueError(f"unknown tag {n}")
+        specs.append(spec)
+    if specs:
+        notes.append(f"{len(specs)} given")
     for concept in slot.get("concepts") or []:
         for system in slot.get("systems") or []:
             r = glossary.resolve(concept, system)

@@ -117,3 +117,14 @@ def test_coder_has_no_database_tool():
     """Role enforcement: the coder analyses artifacts; it cannot fetch with guessed columns."""
     names = {t.name for t in specialists.CODER_TOOLS}
     assert names == {"python_analysis"}
+
+
+def test_every_graph_publishes_a_state_schema():
+    """Studio builds each graph's input/output JSON schema from the state type. A payload
+    class in a channel annotation (``blackboard: dict[str, Artifact]`` held a DataFrame) made
+    that fail with 'Unable to generate pydantic-core schema for DataFrame'."""
+    from mas.orchestrator import agent as orch
+
+    for graph in (orch.build_agent(), specialists.sql_agent(), specialists.graph_agent(),
+                  specialists.coder_agent()):
+        assert graph.get_input_jsonschema() and graph.get_output_jsonschema()

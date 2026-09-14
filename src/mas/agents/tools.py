@@ -348,6 +348,8 @@ def sql_query(sql: str, runtime: ToolRuntime) -> Command:
 
     Doing it well
     - Window: `ts >= '<start>' AND ts < '<end>'`, exactly as the brief gives it.
+    - Setpoints beside values: `JOIN sensor_catalog c ON c.system = 'bfpa' AND c.tag_name =
+      l.tag_name` — tag names repeat across systems, so always join on both.
     - Many tags: `FROM bfpa_long WHERE tag_name IN (...) GROUP BY tag_name`; for *when* the
       extreme happened use `DISTINCT ON (tag_name) … ORDER BY tag_name, value DESC, ts` or a
       window function. Ties are facts: return every tied tag and the earliest time.
@@ -407,6 +409,11 @@ def graph_query(cypher: str, runtime: ToolRuntime) -> Command:
     the parts each job consumed. It holds no sensor values. Write the query that returns the
     whole fact and the ids later steps will need, aggregating in Cypher.
 
+    Often it is the first step of an investigation: it **narrows** 100+ tags down to the few
+    that matter (the ones that alarmed, the family of the symptom, their setpoints) and finds
+    the alert window, so sql_agent measures only those. Return tags as `system` + `tag_name`
+    with their setpoints, so they can be handed over as 'system.tag_name'.
+
     The data
     `(Tag)-[:MEASURED_AT]->(System)` · `(Alert)-[:GENERATED_ON]->(System)` ·
     `(MaintenanceLog)-[:PERFORMED_ON]->(System)` · `(MaintenanceLog)-[:CONSUMED {quantity,
@@ -422,8 +429,10 @@ def graph_query(cypher: str, runtime: ToolRuntime) -> Command:
       `labor_cost`, `total_item_cost`, `downtime_hours`, and `count(m)`; group by
       `maintenance_class` when the mix matters.
     - Parts: `MATCH (m)-[c:CONSUMED]->(i:Item)` then `sum(c.quantity)`, `sum(c.line_cost)`.
-    - Tags that alarm most: `OPTIONAL MATCH (a:Alert)-[:GENERATED_ON]->(s) WHERE a.tag_name =
-      t.tag_name` and `count(a)`.
+    - Narrow a symptom to tags: `MATCH (t:Tag)-[:MEASURED_AT]->(s:System {name: 'turbine'})
+      WHERE t.family = 'vibration'`, then `OPTIONAL MATCH (a:Alert)-[:GENERATED_ON]->(s) WHERE
+      a.tag_name = t.tag_name` with `count(a)` and `max(a.peak_value)`; order by alert count and
+      keep the top few (plus any tag the user named).
     - Always order results fully (add ids as tie-breakers) so the same query returns the same
       rows in the same order.
 
@@ -454,6 +463,18 @@ def graph_query(cypher: str, runtime: ToolRuntime) -> Command:
 
 
 # ── python ───────────────────────────────────────────────────────────────────────
+_SLUG_MAX = 70
+
+
+def figure_filename(fig_id: str, title: str) -> str:
+    """``f7_bfp-a-bearing-temperatures-around-alm-bfpa-0009.png`` — the id keeps it unique and
+    sortable, the title slug says what it shows. Cut at a word boundary."""
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    if len(slug) > _SLUG_MAX:
+        slug = slug[:_SLUG_MAX].rsplit("-", 1)[0]
+    return f"{fig_id}_{slug or 'untitled'}.png"
+
+
 @tool
 def python_analysis(code: str, artifact_ids: list[str], runtime: ToolRuntime) -> Command:
     """Turn fetched data into insight: any analysis and any figures, in Python you write.
@@ -480,7 +501,10 @@ def python_analysis(code: str, artifact_ids: list[str], runtime: ToolRuntime) ->
     - a distinct colour per tag or system; stacked subplots (`sharex=True`) when units
       differ; scatter with `alpha` for dense data, a fit line and r in the legend; clusters
       coloured with centroids marked;
-    - `fig.suptitle(...)` on multi-panel figures — the title becomes the figure's caption.
+    - **The title names the figure.** It becomes the caption and the file name
+      (`f7_bfp-a-bearing-temperatures-around-alm-bfpa-0009.png`), so write it as
+      "<system> <what> <when/event>", e.g. "BFP-A bearing temperatures around ALM-BFPA-0009
+      (03 Sep 00:26–04:10 UTC)". Multi-panel figures: `fig.suptitle(...)`.
 
     Rules code enforces: no filesystem, network, os or sys; randomised sklearn estimators
     need `random_state=0` so results repeat; a hard timeout per call. stdout (≤4,000 chars) is
@@ -530,11 +554,12 @@ def python_analysis(code: str, artifact_ids: list[str], runtime: ToolRuntime) ->
     figures = []
     for drawn in resp.get("figures") or []:
         _FIG_DIR.mkdir(parents=True, exist_ok=True)
-        fig = FigureArtifact(png_path="", caption=drawn.get("title") or "analysis figure",
+        title = (drawn.get("title") or "").strip()
+        fig = FigureArtifact(png_path="", caption=title or "untitled figure",
                              n_points=sum(len(f) for f in frames.values()),
                              provenance=Provenance(capability="python_analysis"))
         fig_id = store.put(fig, "f")
-        target = _FIG_DIR / f"analysis_{fig_id}.png"
+        target = _FIG_DIR / figure_filename(fig_id, title)
         shutil.copyfile(drawn["path"], target)
         fig.png_path = str(target)
         figures.append({"artifact_id": fig_id, "path": str(target), "title": fig.caption})
@@ -542,6 +567,11 @@ def python_analysis(code: str, artifact_ids: list[str], runtime: ToolRuntime) ->
         update["blackboard"] = {f["artifact_id"]: _json_safe(store.get(f["artifact_id"]).digest())
                                 for f in figures}
         payload["figures"] = figures
+        untitled = [f["artifact_id"] for f in figures if f["title"] == "untitled figure"]
+        if untitled:
+            payload["note"] = (f"{', '.join(untitled)} have no title — the title names the file and "
+                               "is the caption the user sees; set one with ax.set_title or "
+                               "fig.suptitle and redraw")
         # The first figure's id stays in the event so reuse checks and traces point at it.
         extra = {"artifact_id": figures[0]["artifact_id"], "figure_path": figures[0]["path"],
                  "figures": [f["artifact_id"] for f in figures]}
