@@ -1,0 +1,37 @@
+# Every runtime dependency, pinned to a compatible major.
+#
+# This file is the single source of truth for dependencies: the project is run
+# from source (no packaging step), so there is no pyproject.toml to mirror.
+#   python -m pip install -r requirements.txt
+#
+# `src/` is put on the import path by pytest.ini (tests), scripts/_bootstrap.py
+# (CLI scripts) and the notebook's own root-detection cell — nothing needs to be
+# pip-installed for `import mas` to work.
+
+# ── data layer ──
+numpy>=1.26,<3
+pandas>=2.1,<3
+psycopg[binary]>=3.1,<4
+neo4j>=5.14,<6
+pydantic>=2.5,<3
+pydantic-settings>=2.1,<3
+scikit-learn>=1.3,<2
+scipy>=1.11,<2
+matplotlib>=3.8,<4
+
+# ── agent layer ──
+langgraph>=0.2
+langchain>=1.0
+langchain-google-genai>=4.0
+google-genai>=0.3
+sqlglot>=25
+
+# ── local dev: `langgraph dev` (LangGraph Studio) + tests ──
+langgraph-cli[inmem]>=0.2
+pytest>=7.4
+
+# ── demonstration notebook: open it, and scripts/build_notebook.py ──
+notebook>=7
+ipykernel>=6.25
+nbformat>=5.9
+nbclient>=0.9

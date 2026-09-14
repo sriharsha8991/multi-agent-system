@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: mas_postgres
+    environment:
+      POSTGRES_USER: ${PG_USER:-mas}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-mas_pw}
+      POSTGRES_DB: ${PG_DB:-mas}
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-mas} -d ${PG_DB:-mas}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5
+    container_name: mas_neo4j
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-mas_neo4j_pw}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4jdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: .
+    container_name: mas_app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    environment:
+      # Container networking: reach the DB services by name, overriding .env localhost.
+      PG_HOST: postgres
+      NEO4J_URI: bolt://neo4j:7687
+    env_file:
+      - .env
+    volumes:
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+      - ./docs:/app/docs
+      - ./tests:/app/tests
+    working_dir: /app
+    command: ["sleep", "infinity"]
+
+volumes:
+  pgdata:
+  neo4jdata:

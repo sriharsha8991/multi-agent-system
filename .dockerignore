@@ -1,0 +1,36 @@
+# Keep the build context to the ~1 MB of source that is actually COPYed.
+# Without this, `build: .` ships the whole directory — venv/ alone is ~578 MB.
+
+# virtualenvs and caches
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ipynb_checkpoints/
+.mas_cache/
+.langgraph_api/
+
+# vcs and tooling
+.git/
+.gitignore
+.github/
+
+# generated artifacts and local state
+outputs/
+artifacts/
+eval/report.json
+eval/report.md
+*.log
+*.png
+
+# secrets — compose injects the real values via env_file
+.env
+
+# not needed at runtime
+docs/
+notebooks/
+README.md
+Problem.md
