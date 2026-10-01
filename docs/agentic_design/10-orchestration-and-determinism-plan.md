@@ -35,13 +35,42 @@ misses every LLM arm shared are handled by typed-fact checks in code:
 | C/S1′ — capable tools with a full "story" per tool (purpose, when to use, craft patterns, checks, output); richer reports; every figure kept with presentation defaults | `agents/tools.py`, `agents/prompts.py`, `execution/py_worker.py` | done; sandbox figure capture tested |
 | C/S2 — sqlglot column validation, Cypher `EXPLAIN` + datetime trap, empty-result hints | `execution/sql_guard.py`, `cypher_guard.py`, `cypher_exec.py`, `agents/tools.py` | done; exercised against the DBs |
 | C/S3 — role enforcement: coder has no DB tool; SQL schema discovery refused; identical calls and 3-failure streaks refused | `agents/specialists.py`, `agents/tools.py` | done |
-| C/S4 — out-of-process sandbox, persistent session per delegation, fixed seeds, `random_state` lint | `execution/py_sandbox.py`, `py_worker.py`, `py_guard.py` | subprocess backend done and tested; docker backend written, image not built |
+| C/S4 — out-of-process sandbox, persistent session per delegation, fixed seeds, `random_state` lint | `execution/py_sandbox.py`, `py_worker.py`, `py_guard.py` | both backends done and tested; docker image built and verified 2026-09-16 (see below) |
 | D — verified query repository, code-owned executor, caching | — | not started (by scope) |
 
 **Not verified:**
 - No agent run and no golden eval were executed after these changes (Gemini budget).
   Behaviour with the live model is unmeasured.
-- The docker sandbox image was not built.
+
+**Docker sandbox verified (2026-09-16).** The image was built from
+`docker/py-sandbox.Dockerfile` and the backend exercised end to end for the first time.
+
+*It did not work.* Every container died before reading a request:
+
+```
+ModuleNotFoundError: No module named 'pydantic_settings'
+  File "/app/src/mas/execution/__init__.py", line 18, in <module>
+    from .timewin import resolve_window
+```
+
+The container invoked the worker as `python -m mas.execution.py_worker`, which executes
+`mas/__init__.py` and `mas/execution/__init__.py` first; the latter eagerly imports
+`timewin → config → pydantic_settings`. The image deliberately carries only the scientific
+stack, and `py_worker` itself imports nothing from `mas` — but the *invocation* did. The
+subprocess backend never hit this because the host venv has every dependency, so the bug was
+invisible until the image existed. Fixed in `execution/py_sandbox.py` by invoking the worker
+by path (`/app/src/mas/execution/py_worker.py`).
+
+After the fix, 12/12 checks pass: worker starts, DataFrames cross the bind mount, namespace
+persists across calls, frames are not re-sent once loaded, figures are drawn in-container and
+readable on the host, sklearn present, exceptions returned as `error` rather than a crash,
+timeout kills the container and raises, and the three isolation claims hold —
+`--network none` (`Errno 101 Network is unreachable`), `--read-only` (`Errno 30 Read-only file
+system`), and non-root `uid 10001`. Regression test: `tests/test_execution.py`
+(`test_docker_backend_starts_and_isolates`, skipped when docker or the image is absent).
+
+The image is **not** built by CI or by `scripts/setup.py`, so a fresh checkout that sets
+`PY_SANDBOX_BACKEND=docker` without running the build still gets no sandbox.
 
 **Data defect found:** the catalog's normal range for `pump_head` (0–100) contradicts its
 physics (~2,240 m). It needs a catalog fix and a reseed.

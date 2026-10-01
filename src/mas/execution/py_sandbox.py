@@ -63,7 +63,12 @@ class SandboxSession:
                    "-e", "PYTHONPATH=/app/src", "-e", "MAS_SANDBOX_WORKDIR=/work",
                    "-e", "MPLCONFIGDIR=/tmp",
                    "-v", f"{SRC}:/app/src:ro", "-v", f"{self.workdir}:/work", "-w", "/work",
-                   s.py_sandbox_image, "python", "-u", "-m", "mas.execution.py_worker"]
+                   # By path, not ``-m mas.execution.py_worker``: running it as a module
+                   # executes ``mas/__init__.py`` and ``mas/execution/__init__.py`` first,
+                   # and the latter imports timewin -> config -> pydantic_settings, which
+                   # the image deliberately does not carry. The worker itself imports
+                   # nothing from ``mas``, so the file runs standalone.
+                   s.py_sandbox_image, "python", "-u", "/app/src/mas/execution/py_worker.py"]
             preexec = None
         elif self.backend == "subprocess":
             cmd = [sys.executable, "-u", "-m", "mas.execution.py_worker"]

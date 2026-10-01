@@ -227,6 +227,53 @@ def test_sandbox_keeps_every_figure_drawn_whatever_the_code_saves():
         s.close(force=True)
 
 
+def _docker_sandbox_available() -> bool:
+    """True when a docker daemon is reachable and the sandbox image is built."""
+    import subprocess
+
+    from mas.config import get_settings
+
+    try:
+        return subprocess.run(["docker", "image", "inspect", get_settings().py_sandbox_image],
+                              capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+@pytest.mark.skipif(not _docker_sandbox_available(),
+                    reason="docker daemon or mas-py-sandbox image unavailable")
+def test_docker_backend_starts_and_isolates():
+    """The docker backend must actually start — and be the boundary it claims to be.
+
+    It regressed unnoticed because the image was never built: the container ran the worker
+    as ``-m mas.execution.py_worker``, which executes ``mas/execution/__init__.py`` first,
+    which imports config -> pydantic_settings. The image carries only the scientific stack,
+    so every container died with ModuleNotFoundError before reading a single request.
+    """
+    import pandas as pd
+
+    from mas.execution.py_sandbox import SandboxSession
+
+    s = SandboxSession(backend="docker", timeout_s=90)
+    try:
+        df = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
+        r = s.run("print(float(df['a'].sum()))", {"t1": df}, "f1.png")
+        assert r["ok"], r.get("error")          # the worker starts and frames cross the mount
+        assert r["stdout"].strip() == "6.0"
+
+        net = s.run("import socket\nsocket.setdefaulttimeout(5)\n"
+                    "socket.create_connection(('1.1.1.1', 53))", {}, "f2.png")
+        assert not net["ok"] and "unreachable" in net["error"].lower()   # --network none
+
+        root = s.run("open('/etc/mas_probe', 'w').write('x')", {}, "f3.png")
+        assert not root["ok"] and "read-only" in root["error"].lower()   # --read-only
+
+        who = s.run("import os\nprint(os.getuid())", {}, "f4.png")
+        assert who["stdout"].strip() == "10001"                          # non-root
+    finally:
+        s.close(force=True)
+
+
 # ── specialist-level loop guards ─────────────────────────────────────────────
 class _GuardRuntime:
     tool_call_id = "call-1"
